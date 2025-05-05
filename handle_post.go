@@ -17,8 +17,8 @@ func uriFromEvent(evt *models.Event) string {
 }
 
 func isPolDomain(domain string) bool {
-	for d := range sets.PolDomains {
-		if strings.HasSuffix(domain, d) {
+	for _, d := range sets.PolDomains {
+		if strings.Contains(domain, d) {
 			return true
 		}
 	}
