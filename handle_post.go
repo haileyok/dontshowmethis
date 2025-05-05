@@ -16,6 +16,15 @@ func uriFromEvent(evt *models.Event) string {
 	return fmt.Sprintf("at://%s/%s/%s", evt.Did, evt.Commit.Collection, evt.Commit.RKey)
 }
 
+func isPolDomain(domain string) bool {
+	for d := range sets.PolDomains {
+		if strings.HasSuffix(domain, d) {
+			return true
+		}
+	}
+	return false
+}
+
 func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event, post *bsky.FeedPost) error {
 	if event == nil || event.Commit == nil {
 		return nil
@@ -35,7 +44,7 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 
 		domain := strings.ToLower(u.Hostname())
 
-		if sets.PolDomains[domain] {
+		if isPolDomain(domain) {
 			if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLink); err != nil {
 				return err
 			}
@@ -56,7 +65,7 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 
 			domain := strings.ToLower(u.Hostname())
 
-			if sets.PolDomains[domain] {
+			if isPolDomain(domain) {
 				if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLink); err != nil {
 					return err
 				}
