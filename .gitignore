@@ -1,1 +1,5 @@
 dontshowmethis
+node_modules/
+labels.db*
+.env
+*.js

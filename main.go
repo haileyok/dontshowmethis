@@ -1,20 +1,31 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 
 	"github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/util"
 	"github.com/bluesky-social/indigo/xrpc"
 	"github.com/bluesky-social/jetstream/pkg/client"
 	"github.com/bluesky-social/jetstream/pkg/client/schedulers/sequential"
 	"github.com/bluesky-social/jetstream/pkg/models"
 	_ "github.com/joho/godotenv/autoload"
+	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli/v2"
+)
+
+const (
+	RedisPrefix       = "dsmt/"
+	LabelPolLink      = "pol-link"
+	LabelPolLinkReply = "pol-link-reply"
 )
 
 func main() {
@@ -23,30 +34,27 @@ func main() {
 		Action: run,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "ozone",
-				EnvVars: []string{"OZONE"},
-				// Required: true,
-			},
-			&cli.StringFlag{
-				Name:    "pds",
-				EnvVars: []string{"PDS"},
-				Value:   "https://bsky.social",
-				// Required: true,
-			},
-			&cli.StringFlag{
-				Name:    "username",
-				EnvVars: []string{"USERNAME"},
-				// Required: true,
-			},
-			&cli.StringFlag{
-				Name:    "password",
-				EnvVars: []string{"PASSWORD"},
-				// Required: true,
-			},
-			&cli.StringFlag{
 				Name:    "jetstream-url",
 				EnvVars: []string{"JETSTREAM_URL"},
 				Value:   "wss://jetstream2.us-west.bsky.network/subscribe",
+			},
+			&cli.StringFlag{
+				Name:     "labeler-url",
+				Usage:    "skyware labeler event emission url",
+				Required: true,
+				EnvVars:  []string{"LABELER_URL"},
+			},
+			&cli.StringFlag{
+				Name:     "labeler-key",
+				Usage:    "skyware labeler event emission key",
+				Required: true,
+				EnvVars:  []string{"LABELER_KEY"},
+			},
+			&cli.StringFlag{
+				Name:     "redis-addr",
+				Usage:    "redis addr",
+				Required: true,
+				EnvVars:  []string{"REDIS_ADDR"},
 			},
 		},
 	}
@@ -55,8 +63,13 @@ func main() {
 }
 
 type DontShowMeThis struct {
-	logger *slog.Logger
-	client *xrpc.Client
+	logger     *slog.Logger
+	bskyClient *xrpc.Client
+	h          *http.Client
+	r          *redis.Client
+
+	labelerUrl string
+	labelerKey string
 }
 
 var run = func(cmd *cli.Context) error {
@@ -65,9 +78,9 @@ var run = func(cmd *cli.Context) error {
 			Level:     slog.LevelInfo,
 			AddSource: true,
 		})),
+		labelerUrl: cmd.String("labeler-url"),
+		labelerKey: cmd.String("labeler-key"),
 	}
-
-	dsmt.startConsumer(cmd.String("jetstream-url"))
 
 	cli := &xrpc.Client{
 		Host:    cmd.String("pds"),
@@ -75,33 +88,17 @@ var run = func(cmd *cli.Context) error {
 		Auth:    &xrpc.AuthInfo{},
 	}
 
-	// if loaded, err := dsmt.loadSession(); !loaded {
-	// 	if err != nil {
-	// 		fmt.Printf("there was an error when loading the session: %v", err)
-	// 	}
-	//
-	// 	res, err := atproto.ServerCreateSession(context.TODO(), cli, &atproto.ServerCreateSession_Input{
-	// 		Identifier: cmd.String("username"),
-	// 		Password:   cmd.String("password"),
-	// 	})
-	//
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	//
-	// 	cli.Auth.Did = res.Did
-	// 	cli.Auth.Handle = res.Handle
-	// 	cli.Auth.AccessJwt = res.AccessJwt
-	// 	cli.Auth.RefreshJwt = res.RefreshJwt
-	//
-	// 	dsmt.saveSession()
-	// }
-	//
-	// cli.Headers = map[string]string{
-	// 	"atproto-proxy": cmd.String("ozone") + "#atproto_labeler",
-	// }
+	dsmt.bskyClient = cli
 
-	dsmt.client = cli
+	dsmt.h = util.RobustHTTPClient()
+
+	r := redis.NewClient(&redis.Options{
+		Addr: cmd.String("redis-addr"),
+	})
+
+	dsmt.r = r
+
+	dsmt.startConsumer(cmd.String("jetstream-url"))
 
 	return nil
 }
@@ -147,50 +144,45 @@ func (dsmt *DontShowMeThis) handleEvent(ctx context.Context, event *models.Event
 	return nil
 }
 
-type session struct {
-	Did        string `json:"did"`
-	Handle     string `json:"handle"`
-	AccessJwt  string `json:"access_jwt"`
-	RefreshJwt string `json:"refresh_jwt"`
+type EmitLabelRequest struct {
+	Uri   string `json:"uri"`
+	Label string `json:"label"`
 }
 
-func (dsmt *DontShowMeThis) loadSession() (bool, error) {
-	b, err := os.ReadFile("./auth.auth")
+func (dsmt *DontShowMeThis) emitLabel(ctx context.Context, uri, label string) error {
+	body := &EmitLabelRequest{
+		Uri:   uri,
+		Label: label,
+	}
+
+	b, err := json.Marshal(body)
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	var s session
-	err = json.Unmarshal(b, &s)
+	req, err := http.NewRequestWithContext(ctx, "POST", dsmt.labelerUrl+"/emit", bytes.NewReader(b))
 	if err != nil {
-		return false, err
+		return err
 	}
 
-	dsmt.client.Auth.Did = s.Did
-	dsmt.client.Auth.Handle = s.Handle
-	dsmt.client.Auth.AccessJwt = s.AccessJwt
-	dsmt.client.Auth.RefreshJwt = s.RefreshJwt
+	req.Header.Set("authorization", "Bearer "+dsmt.labelerKey)
+	req.Header.Set("content-type", "application/json")
 
-	return true, nil
-}
-
-func (dsmt *DontShowMeThis) saveSession() {
-	s := &session{
-		Did:        dsmt.client.Auth.Did,
-		Handle:     dsmt.client.Auth.Handle,
-		AccessJwt:  dsmt.client.Auth.AccessJwt,
-		RefreshJwt: dsmt.client.Auth.RefreshJwt,
-	}
-
-	// write to file
-	b, err := json.Marshal(s)
+	resp, err := dsmt.h.Do(req)
 	if err != nil {
-		dsmt.logger.Error("error saving session", "err", err)
-		return
+		return err
+	}
+	defer resp.Body.Close()
+
+	io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("received invalid status code from server: %d", resp.StatusCode)
 	}
 
-	err = os.WriteFile("./auth.auth", b, 0644)
-	if err != nil {
-		dsmt.logger.Error("error saving session", "err", err)
+	if _, err := dsmt.r.SAdd(ctx, RedisPrefix+label, uri).Result(); err != nil {
+		return err
 	}
+
+	return nil
 }
