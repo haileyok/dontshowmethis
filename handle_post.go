@@ -9,7 +9,6 @@ import (
 	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/jetstream/pkg/models"
 	"github.com/haileyok/dontshowmethis/sets"
-	"github.com/redis/go-redis/v9"
 )
 
 func uriFromEvent(evt *models.Event) string {
@@ -74,19 +73,19 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 		}
 	}
 
-	if post.Reply != nil {
-		ism, err := dsmt.r.SIsMember(ctx, RedisPrefix+LabelPolLink, post.Reply.Root.Uri).Result()
-		if err != nil && err != redis.Nil {
-			return err
-		}
-
-		if ism {
-			if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLinkReply); err != nil {
-				return err
-			}
-			return nil
-		}
-	}
+	// if post.Reply != nil {
+	// 	ism, err := dsmt.r.SIsMember(ctx, RedisPrefix+LabelPolLink, post.Reply.Root.Uri).Result()
+	// 	if err != nil && err != redis.Nil {
+	// 		return err
+	// 	}
+	//
+	// 	if ism {
+	// 		if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLinkReply); err != nil {
+	// 			return err
+	// 		}
+	// 		return nil
+	// 	}
+	// }
 
 	return nil
 }
