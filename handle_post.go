@@ -15,7 +15,11 @@ func uriFromEvent(evt *models.Event) string {
 	return fmt.Sprintf("at://%s/%s/%s", evt.Did, evt.Commit.Collection, evt.Commit.RKey)
 }
 
-func isPolDomain(domain string) bool {
+func isPolDomain(url *url.URL) bool {
+	domain := url.Hostname()
+	domain = strings.ToLower(domain)
+	domain = strings.TrimPrefix(domain, "www.")
+
 	for _, d := range sets.PolDomains {
 		if strings.Contains(domain, d) {
 			return true
@@ -41,9 +45,7 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 			return err
 		}
 
-		domain := strings.ToLower(u.Hostname())
-
-		if isPolDomain(domain) {
+		if isPolDomain(u) {
 			if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLink); err != nil {
 				return err
 			}
@@ -62,9 +64,7 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 				return err
 			}
 
-			domain := strings.ToLower(u.Hostname())
-
-			if isPolDomain(domain) {
+			if isPolDomain(u) {
 				if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLink); err != nil {
 					return err
 				}
