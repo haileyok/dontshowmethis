@@ -13,9 +13,10 @@ import (
 )
 
 type LMStudioClient struct {
-	host   string
-	httpc  *http.Client
-	logger *slog.Logger
+	host      string
+	httpc     *http.Client
+	logger    *slog.Logger
+	modelName string
 }
 type ResponseSchema struct {
 	Type       string              `json:"type"`
@@ -88,16 +89,17 @@ var (
 	}
 )
 
-func NewLMStudioClient(host string, logger *slog.Logger) *LMStudioClient {
+func NewLMStudioClient(host string, modelName string, logger *slog.Logger) *LMStudioClient {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	logger = logger.With("component", "lmstudio")
 	httpc := robusthttp.NewClient()
 	return &LMStudioClient{
-		host:   host,
-		httpc:  httpc,
-		logger: logger,
+		host:      host,
+		httpc:     httpc,
+		logger:    logger,
+		modelName: modelName,
 	}
 }
 
@@ -140,7 +142,7 @@ type BadFaithResults struct {
 
 func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string) (*BadFaithResults, error) {
 	request := ChatRequest{
-		Model: "google/gemma-3-27b",
+		Model: c.modelName,
 		Messages: []Message{
 			{
 				Role:    "system",

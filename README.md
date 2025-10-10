@@ -4,7 +4,7 @@ An AI-powered Bluesky content moderation system that automatically labels replie
 
 ## Overview
 
-This project monitors Bluesky posts in real-time via Jetstream and uses a local LLM (via LM Studio) to classify replies to watched accounts. It automatically applies labels such as "bad-faith", "off-topic", and "funny" to help users filter and moderate content.
+This project monitors Bluesky posts in real-time via Jetstream and uses an LLM (via any OpenAI-compatible completions API) to classify replies to watched accounts. It automatically applies labels such as "bad-faith", "off-topic", and "funny" to help users filter and moderate content.
 
 The system consists of two components:
 1. **Go Consumer** - Monitors the Jetstream firehose and analyzes replies using an LLM
@@ -13,18 +13,18 @@ The system consists of two components:
 ## Architecture
 
 ```
-Jetstream → Go Consumer → LM Studio (LLM) → Labeler Service → Bluesky
+Jetstream → Go Consumer → Completions API (LLM) → Labeler Service → Bluesky
 ```
 
 1. The Go consumer subscribes to Jetstream and monitors replies to specified accounts
-2. When a reply is detected, it fetches the parent post and sends both to LM Studio
+2. When a reply is detected, it fetches the parent post and sends both to your completions API
 3. The LLM classifies the reply based on the system prompt
 4. Labels are emitted via the Skyware labeler service
 5. Labels are propagated to Bluesky's labeling system
 
 ## Prerequisites
 
-- [LM Studio](https://lmstudio.ai/) with a compatible model loaded
+- An OpenAI-compatible completions API endpoint (e.g., [LM Studio](https://lmstudio.ai/), OpenAI, or any other compatible provider)
 - A Bluesky account for the labeler
 
 ## Installation
@@ -71,7 +71,7 @@ cp .env.example .env
 - `JETSTREAM_URL` - Jetstream WebSocket URL (default: `wss://jetstream2.us-west.bsky.network/subscribe`)
 - `LABELER_URL` - URL of your labeler service (e.g., `http://localhost:3000`)
 - `LABELER_KEY` - Authentication key for the labeler API
-- `LMSTUDIO_HOST` - LM Studio API host (e.g., `http://localhost:1234`)
+- `COMPLETIONS_API_HOST` - Completions API host (e.g., `http://localhost:1234`)
 - `LOG_DB_NAME` - The name of the SQLite db to log to
 
 **For the Skyware Labeler:**
@@ -82,11 +82,17 @@ cp .env.example .env
 
 ## Running the Services
 
-### 1. Start LM Studio
+### 1. Start your Completions API
 
+Start your OpenAI-compatible completions API endpoint. For example:
+
+**Using LM Studio:**
 1. Open LM Studio
 2. Load a compatible model (recommended: `google/gemma-3-27b` or similar)
 3. Start the local server (usually runs on `http://localhost:1234`)
+
+**Using OpenAI or other providers:**
+- Ensure your API endpoint is accessible and you have configured `COMPLETIONS_API_HOST` in your `.env` file
 
 ### 2. Start the Labeler Service
 
@@ -133,7 +139,7 @@ Add the returned DID to your `WATCHED_OPS` environment variable.
 
 ## How Content Classification Works
 
-See `lmstudio.go:147` for the system prompt.
+The system uses a structured prompt to classify content. See `lmstudio.go:147` for the system prompt.
 
 ## Development
 
@@ -143,7 +149,7 @@ See `lmstudio.go:147` for the system prompt.
 .
 ├── main.go              # CLI setup and consumer initialization
 ├── handle_post.go       # Post handling and labeling logic
-├── lmstudio.go         # LLM client and content classification
+├── lmstudio.go         # Completions API client and content classification
 ├── sets/
 │   └── domains.go      # Political domain list (currently unused)
 ├── labeler/
@@ -182,4 +188,3 @@ MIT
 
 - [Jetstream](https://github.com/bluesky-social/jetstream) - Real-time firehose for Bluesky
 - [Skyware](https://skyware.js.org/) - Labeler framework
-- [LM Studio](https://lmstudio.ai/) - Local LLM inference

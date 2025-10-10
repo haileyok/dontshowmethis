@@ -82,15 +82,21 @@ func main() {
 				EnvVars:  []string{"LABELER_KEY"},
 			},
 			&cli.StringFlag{
-				Name:     "lmstudio-host",
-				Usage:    "lmstudio host",
-				EnvVars:  []string{"LMSTUDIO_HOST"},
+				Name:     "completions-api-host",
+				Usage:    "host for the completions api you are using. starts with https:// and has no trailing slash or endpoint",
+				EnvVars:  []string{"COMPLETIONS_API_HOST", "LMSTUDIO_HOST"},
 				Required: true,
 			},
 			&cli.StringFlag{
 				Name:    "log-db",
 				Usage:   "name of the logging db (sqlite)",
 				EnvVars: []string{"LOG_DB_NAME"},
+			},
+			&cli.StringFlag{
+				Name:    "model-name",
+				Usage:   "name of the model to use with openai completions api",
+				EnvVars: []string{"MODEL_NAME"},
+				Value:   "google/gemma-3-27b",
 			},
 		},
 	}
@@ -130,6 +136,7 @@ var run = func(cmd *cli.Context) error {
 		LabelerKey      string
 		LmstudioHost    string
 		LogDbName       string
+		ModelName       string
 	}{
 		PdsUrl:          cmd.String("pds-url"),
 		JetstreamUrl:    cmd.String("jetstream-url"),
@@ -140,8 +147,9 @@ var run = func(cmd *cli.Context) error {
 		LoggedLabels:    cmd.StringSlice("logged-labels"),
 		LabelerUrl:      cmd.String("labeler-url"),
 		LabelerKey:      cmd.String("labeler-key"),
-		LmstudioHost:    cmd.String("lmstudio-host"),
+		LmstudioHost:    cmd.String("completions-api-host"),
 		LogDbName:       cmd.String("log-db"),
+		ModelName:       cmd.String("model-name"),
 	}
 
 	if len(opt.LoggedLabels) > 0 && opt.LogDbName == "" {
@@ -178,7 +186,7 @@ var run = func(cmd *cli.Context) error {
 
 	httpc := util.RobustHTTPClient()
 
-	lmstudioc := NewLMStudioClient(opt.LmstudioHost, logger)
+	lmstudioc := NewLMStudioClient(opt.LmstudioHost, opt.ModelName, logger)
 
 	postCache := lru.NewLRU[string, *bsky.FeedPost](100, nil, 1*time.Hour)
 
