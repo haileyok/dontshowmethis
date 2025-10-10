@@ -25,6 +25,8 @@ import (
 
 const (
 	LabelBadFaith = "bad-faith"
+	LabelOffTopic = "off-topic"
+	LabelFunny    = "funny"
 )
 
 func main() {

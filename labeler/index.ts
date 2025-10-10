@@ -4,6 +4,8 @@ import 'dotenv/config'
 
 const LABELS: Record<string, boolean> = {
   'bad-faith': true,
+  'off-topic': true,
+  funny: true,
 }
 
 function run() {

@@ -75,8 +75,16 @@ var (
 				Type:        "boolean",
 				Description: "Whether the reply to the parent is bad faith or not.",
 			},
+			"off_topic": {
+				Type:        "boolean",
+				Description: "Whether the reply to the parent is off topic.",
+			},
+			"funny": {
+				Type:        "boolean",
+				Description: "Whether the reply to the parent is funny.",
+			},
 		},
-		Required: []string{"bad_faith"},
+		Required: []string{"bad_faith", "off_topic", "funny"},
 	}
 )
 
@@ -124,13 +132,19 @@ func (c *LMStudioClient) sendChatRequest(request ChatRequest) (*ChatResponse, er
 	return &chatResp, nil
 }
 
-func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string) (bool, error) {
+type BadFaithResults struct {
+	BadFaith bool
+	OffTopic bool
+	Funny    bool
+}
+
+func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string) (*BadFaithResults, error) {
 	request := ChatRequest{
 		Model: "google/gemma-3-27b",
 		Messages: []Message{
 			{
 				Role:    "system",
-				Content: "You are an observer of posts on a microblogging website. You determine if the second message provided by the user is a bad faith reply to the second message provided to you. Opposing viewpoints are good, and should be appreciated. However, things that are toxic, trollish, or offer no good value to the conversation are considered bad faith.",
+				Content: "You are an observer of posts on a microblogging website. You determine if the second message provided by the user is a bad faith reply, and off topic reply, and/or a funny reply to the second message provided to you. Opposing viewpoints are good, and should be appreciated. However, things that are toxic, trollish, or offer no good value to the conversation are considered bad faith. Just because something is bad faith or off topic does not mean the post cannot also be funny.",
 			},
 			{
 				Role:    "user",
@@ -142,7 +156,7 @@ func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string
 			},
 		},
 		Temperature: 0.7,
-		MaxTokens:   50,
+		MaxTokens:   100,
 		ResponseFormat: &ResponseFormat{
 			Type: "json_schema",
 			JSONSchema: &JSONSchemaWrap{
@@ -154,18 +168,32 @@ func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string
 	}
 	response, err := c.sendChatRequest(request)
 	if err != nil {
-		return false, fmt.Errorf("failed to get chat response: %w", err)
+		return nil, fmt.Errorf("failed to get chat response: %w", err)
 	}
 
 	var result map[string]any
 	if err := json.Unmarshal([]byte(response.Choices[0].Message.Content), &result); err != nil {
-		return false, fmt.Errorf("failed to unmarshal response: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	badFaith, ok := result["bad_faith"].(bool)
 	if !ok {
-		return false, fmt.Errorf("model gave bad response, not structured")
+		return nil, fmt.Errorf("model gave bad response (bad faith), not structured")
 	}
 
-	return badFaith, nil
+	offTopic, ok := result["off_topic"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("model gave bad response (off topic), not structured")
+	}
+
+	funny, ok := result["funny"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("model gave bad response (funny), not structured")
+	}
+
+	return &BadFaithResults{
+		BadFaith: badFaith,
+		OffTopic: offTopic,
+		Funny:    funny,
+	}, nil
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -16,15 +15,21 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 		return nil
 	}
 
-	if post.Reply == nil {
+	var parentUri string
+
+	if post.Reply != nil && post.Reply.Parent != nil {
+		parentUri = post.Reply.Parent.Uri
+	} else if post.Embed != nil && post.Embed.EmbedRecord != nil && post.Embed.EmbedRecord.Record != nil {
+		parentUri = post.Embed.EmbedRecord.Record.Uri
+	} else if post.Embed != nil && post.Embed.EmbedRecordWithMedia != nil && post.Embed.EmbedRecordWithMedia.Record != nil && post.Embed.EmbedRecordWithMedia.Record.Record != nil {
+		parentUri = post.Embed.EmbedRecordWithMedia.Record.Record.Uri
+	}
+
+	if parentUri == "" {
 		return nil
 	}
 
-	if post.Reply.Parent == nil {
-		return errors.New("badly formatted reply ref (no parent)")
-	}
-
-	atUri, err := syntax.ParseATURI(post.Reply.Parent.Uri)
+	atUri, err := syntax.ParseATURI(parentUri)
 	if err != nil {
 		return fmt.Errorf("failed to parse parent aturi: %w", err)
 	}
@@ -46,7 +51,7 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 		return nil
 	}
 
-	parent, err := dsmt.getPost(ctx, post.Reply.Parent.Uri)
+	parent, err := dsmt.getPost(ctx, parentUri)
 	if err != nil {
 		return fmt.Errorf("failed to get parent post: %w", err)
 	}
@@ -54,21 +59,31 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	isBadFaith, err := dsmt.lmstudioc.GetIsBadFaith(ctx, parent.Text, post.Text)
+	results, err := dsmt.lmstudioc.GetIsBadFaith(ctx, parent.Text, post.Text)
 	if err != nil {
 		return fmt.Errorf("failed to check bad faith: %w", err)
 	}
 
-	if !isBadFaith {
-		logger.Info("determined that reply was not bad faith")
-		return nil
+	if results.BadFaith {
+		if err := dsmt.emitLabel(ctx, uri, LabelBadFaith); err != nil {
+			return fmt.Errorf("failed to label post: %w", err)
+		}
+		logger.Info("determined that reply was bad faith and emitted label")
 	}
 
-	if err := dsmt.emitLabel(ctx, uri, LabelBadFaith); err != nil {
-		return fmt.Errorf("failed to label post: %w", err)
+	if results.OffTopic {
+		if err := dsmt.emitLabel(ctx, uri, LabelOffTopic); err != nil {
+			return fmt.Errorf("failed to label post: %w", err)
+		}
+		logger.Info("determined that reply was off topic and emitted label")
 	}
 
-	logger.Info("determined that reply was bad faith and emitted label")
+	if results.Funny {
+		if err := dsmt.emitLabel(ctx, uri, LabelFunny); err != nil {
+			return fmt.Errorf("failed to label post: %w", err)
+		}
+		logger.Info("determined that reply was funny and emitted label")
+	}
 
 	return nil
 }
