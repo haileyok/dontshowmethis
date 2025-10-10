@@ -154,17 +154,20 @@ var run = func(cmd *cli.Context) error {
 
 	watchedOps := make(map[string]struct{}, len(opt.WatchedOps))
 	for _, op := range opt.WatchedOps {
+		logger.Info("adding did to watched ops", "did", op)
 		watchedOps[op] = struct{}{}
 	}
 
 	watchedLogOps := make(map[string]struct{}, len(opt.WatchedLogOps))
 	for _, op := range opt.WatchedLogOps {
+		logger.Info("adding did to watched log ops", "did", op)
 		watchedLogOps[op] = struct{}{}
 	}
 
 	loggedLabels := make(map[string]struct{}, len(opt.LoggedLabels))
-	for _, op := range opt.LoggedLabels {
-		loggedLabels[op] = struct{}{}
+	for _, l := range opt.LoggedLabels {
+		logger.Info("adding label to log", "label", l)
+		loggedLabels[l] = struct{}{}
 	}
 
 	xrpcc := &xrpc.Client{
@@ -200,7 +203,11 @@ var run = func(cmd *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create gorm db: %w", err)
 		}
+
 		logger.Info("opened gorm db for logging")
+
+		db.AutoMigrate(&LogItem{})
+
 		dsmt.db = db
 	}
 
