@@ -35,8 +35,9 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 	}
 
 	opDid := atUri.Authority().String()
-	_, ok := dsmt.watchedOps[opDid]
-	if !ok {
+	_, isWatchedOp := dsmt.watchedOps[opDid]
+	_, isWatchedLogOp := dsmt.watchedLogOps[opDid]
+	if !isWatchedOp && !isWatchedLogOp {
 		return nil
 	}
 
@@ -64,25 +65,47 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 		return fmt.Errorf("failed to check bad faith: %w", err)
 	}
 
+	labels := []string{}
 	if results.BadFaith {
-		if err := dsmt.emitLabel(ctx, uri, LabelBadFaith); err != nil {
-			return fmt.Errorf("failed to label post: %w", err)
-		}
-		logger.Info("determined that reply was bad faith and emitted label")
+		labels = append(labels, LabelBadFaith)
 	}
-
 	if results.OffTopic {
-		if err := dsmt.emitLabel(ctx, uri, LabelOffTopic); err != nil {
-			return fmt.Errorf("failed to label post: %w", err)
-		}
-		logger.Info("determined that reply was off topic and emitted label")
+		labels = append(labels, LabelOffTopic)
+	}
+	if results.Funny {
+		labels = append(labels, LabelFunny)
 	}
 
-	if results.Funny {
-		if err := dsmt.emitLabel(ctx, uri, LabelFunny); err != nil {
-			return fmt.Errorf("failed to label post: %w", err)
+	if len(labels) == 0 {
+		logger.Info("no labels to emit or log")
+		return nil
+	}
+
+	for _, l := range labels {
+		if isWatchedOp {
+			if err := dsmt.emitLabel(ctx, uri, l); err != nil {
+				return fmt.Errorf("failed to label post with %s: %w", l, err)
+			}
+			logger.Info("emitted label", "label", l)
 		}
-		logger.Info("determined that reply was funny and emitted label")
+
+		_, isLoggedLabel := dsmt.loggedLabels[l]
+		if dsmt.db != nil && (isWatchedOp || isWatchedLogOp) && isLoggedLabel {
+			item := LogItem{
+				ParentDid:  opDid,
+				AuthorDid:  event.Did,
+				ParentUri:  parentUri,
+				AuthorUri:  uri,
+				ParentText: parent.Text,
+				AuthorText: post.Text,
+				Label:      l,
+			}
+
+			if err := dsmt.db.Create(&item).Error; err != nil {
+				return fmt.Errorf("failed to insert log: %w", err)
+			}
+			logger.Info("logged", "label", l)
+		}
 	}
 
 	return nil

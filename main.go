@@ -21,6 +21,8 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/urfave/cli/v2"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 const (
@@ -54,6 +56,14 @@ func main() {
 				EnvVars:  []string{"WATCHED_OPS"},
 				Required: true,
 			},
+			&cli.StringSliceFlag{
+				Name:    "watched-log-ops",
+				EnvVars: []string{"WATCHED_LOG_OPS"},
+			},
+			&cli.StringSliceFlag{
+				Name:    "logged-labels",
+				EnvVars: []string{"LOGGED_LABELS"},
+			},
 			&cli.StringFlag{
 				Name:    "jetstream-url",
 				EnvVars: []string{"JETSTREAM_URL"},
@@ -77,6 +87,11 @@ func main() {
 				EnvVars:  []string{"LMSTUDIO_HOST"},
 				Required: true,
 			},
+			&cli.StringFlag{
+				Name:    "log-db",
+				Usage:   "name of the logging db (sqlite)",
+				EnvVars: []string{"LOG_DB_NAME"},
+			},
 		},
 	}
 
@@ -88,7 +103,9 @@ type DontShowMeThis struct {
 	xrpcc  *xrpc.Client
 	httpc  *http.Client
 
-	watchedOps map[string]struct{}
+	watchedOps    map[string]struct{}
+	watchedLogOps map[string]struct{}
+	loggedLabels  map[string]struct{}
 
 	labelerUrl string
 	labelerKey string
@@ -96,6 +113,8 @@ type DontShowMeThis struct {
 	lmstudioc *LMStudioClient
 
 	postCache *lru.LRU[string, *bsky.FeedPost]
+
+	db *gorm.DB
 }
 
 var run = func(cmd *cli.Context) error {
@@ -105,18 +124,28 @@ var run = func(cmd *cli.Context) error {
 		AccountHandle   string
 		AccountPassword string
 		WatchedOps      []string
+		WatchedLogOps   []string
+		LoggedLabels    []string
 		LabelerUrl      string
 		LabelerKey      string
 		LmstudioHost    string
+		LogDbName       string
 	}{
 		PdsUrl:          cmd.String("pds-url"),
 		JetstreamUrl:    cmd.String("jetstream-url"),
 		AccountHandle:   cmd.String("account-handle"),
 		AccountPassword: cmd.String("account-password"),
 		WatchedOps:      cmd.StringSlice("watched-ops"),
+		WatchedLogOps:   cmd.StringSlice("watched-log-ops"),
+		LoggedLabels:    cmd.StringSlice("logged-labels"),
 		LabelerUrl:      cmd.String("labeler-url"),
 		LabelerKey:      cmd.String("labeler-key"),
 		LmstudioHost:    cmd.String("lmstudio-host"),
+		LogDbName:       cmd.String("log-db"),
+	}
+
+	if len(opt.LoggedLabels) > 0 && opt.LogDbName == "" {
+		return fmt.Errorf("attempting to log labels, but did not include a db name in arguments")
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -125,7 +154,20 @@ var run = func(cmd *cli.Context) error {
 
 	watchedOps := make(map[string]struct{}, len(opt.WatchedOps))
 	for _, op := range opt.WatchedOps {
+		logger.Info("adding did to watched ops", "did", op)
 		watchedOps[op] = struct{}{}
+	}
+
+	watchedLogOps := make(map[string]struct{}, len(opt.WatchedLogOps))
+	for _, op := range opt.WatchedLogOps {
+		logger.Info("adding did to watched log ops", "did", op)
+		watchedLogOps[op] = struct{}{}
+	}
+
+	loggedLabels := make(map[string]struct{}, len(opt.LoggedLabels))
+	for _, l := range opt.LoggedLabels {
+		logger.Info("adding label to log", "label", l)
+		loggedLabels[l] = struct{}{}
 	}
 
 	xrpcc := &xrpc.Client{
@@ -145,13 +187,28 @@ var run = func(cmd *cli.Context) error {
 			Level:     slog.LevelInfo,
 			AddSource: true,
 		})),
-		labelerUrl: opt.LabelerUrl,
-		labelerKey: opt.LabelerKey,
-		watchedOps: watchedOps,
-		xrpcc:      xrpcc,
-		httpc:      httpc,
-		lmstudioc:  lmstudioc,
-		postCache:  postCache,
+		labelerUrl:    opt.LabelerUrl,
+		labelerKey:    opt.LabelerKey,
+		watchedOps:    watchedOps,
+		watchedLogOps: watchedLogOps,
+		loggedLabels:  loggedLabels,
+		xrpcc:         xrpcc,
+		httpc:         httpc,
+		lmstudioc:     lmstudioc,
+		postCache:     postCache,
+	}
+
+	if opt.LogDbName != "" {
+		db, err := gorm.Open(sqlite.Open(opt.LogDbName), &gorm.Config{})
+		if err != nil {
+			return fmt.Errorf("failed to create gorm db: %w", err)
+		}
+
+		logger.Info("opened gorm db for logging")
+
+		db.AutoMigrate(&LogItem{})
+
+		dsmt.db = db
 	}
 
 	dsmt.startConsumer(cmd.String("jetstream-url"))
