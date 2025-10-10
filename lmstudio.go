@@ -144,7 +144,7 @@ func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string
 		Messages: []Message{
 			{
 				Role:    "system",
-				Content: "You are an observer of posts on a microblogging website. You determine if the second message provided by the user is a bad faith reply, and off topic reply, and/or a funny reply to the second message provided to you. Opposing viewpoints are good, and should be appreciated. However, things that are toxic, trollish, or offer no good value to the conversation are considered bad faith. Just because something is bad faith or off topic does not mean the post cannot also be funny.",
+				Content: "You are an observer of posts on a microblogging website. You determine if the second message provided by the user is a bad faith reply, an off topic reply, and/or a funny reply to the second message provided to you. Opposing viewpoints are good, and should be appreciated. However, things that are toxic, trollish, or offer no good value to the conversation are considered bad faith. Just because something is bad faith or off topic does not mean the post cannot also be funny.",
 			},
 			{
 				Role:    "user",
