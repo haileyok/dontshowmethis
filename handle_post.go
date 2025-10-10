@@ -89,7 +89,8 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 			logger.Info("emitted label", "label", l)
 		}
 
-		if dsmt.db != nil && (isWatchedOp || isWatchedLogOp) {
+		_, isLoggedLabel := dsmt.loggedLabels[l]
+		if dsmt.db != nil && (isWatchedOp || isWatchedLogOp) && isLoggedLabel {
 			item := LogItem{
 				ParentDid:  opDid,
 				AuthorDid:  event.Did,
