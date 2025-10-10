@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/bluesky-social/indigo/api/bsky"
 	"github.com/bluesky-social/indigo/util"
@@ -17,15 +18,13 @@ import (
 	"github.com/bluesky-social/jetstream/pkg/client"
 	"github.com/bluesky-social/jetstream/pkg/client/schedulers/sequential"
 	"github.com/bluesky-social/jetstream/pkg/models"
+	lru "github.com/hashicorp/golang-lru/v2/expirable"
 	_ "github.com/joho/godotenv/autoload"
-	"github.com/redis/go-redis/v9"
 	"github.com/urfave/cli/v2"
 )
 
 const (
-	RedisPrefix       = "dsmt/"
-	LabelPolLink      = "pol-link"
-	LabelPolLinkReply = "pol-link-reply"
+	LabelBadFaith = "bad-faith"
 )
 
 func main() {
@@ -33,6 +32,26 @@ func main() {
 		Name:   "dontshowmethis",
 		Action: run,
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:     "pds-url",
+				EnvVars:  []string{"PDS_URL"},
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:     "account-handle",
+				EnvVars:  []string{"ACCOUNT_HANDLE"},
+				Required: true,
+			},
+			&cli.StringFlag{
+				Name:     "account-password",
+				EnvVars:  []string{"ACCOUNT_PASSWORD"},
+				Required: true,
+			},
+			&cli.StringSliceFlag{
+				Name:     "watched-ops",
+				EnvVars:  []string{"WATCHED_OPS"},
+				Required: true,
+			},
 			&cli.StringFlag{
 				Name:    "jetstream-url",
 				EnvVars: []string{"JETSTREAM_URL"},
@@ -51,10 +70,10 @@ func main() {
 				EnvVars:  []string{"LABELER_KEY"},
 			},
 			&cli.StringFlag{
-				Name:     "redis-addr",
-				Usage:    "redis addr",
+				Name:     "lmstudio-host",
+				Usage:    "lmstudio host",
+				EnvVars:  []string{"LMSTUDIO_HOST"},
 				Required: true,
-				EnvVars:  []string{"REDIS_ADDR"},
 			},
 		},
 	}
@@ -63,49 +82,84 @@ func main() {
 }
 
 type DontShowMeThis struct {
-	logger     *slog.Logger
-	bskyClient *xrpc.Client
-	h          *http.Client
-	r          *redis.Client
+	logger *slog.Logger
+	xrpcc  *xrpc.Client
+	httpc  *http.Client
+
+	watchedOps map[string]struct{}
 
 	labelerUrl string
 	labelerKey string
+
+	lmstudioc *LMStudioClient
+
+	postCache *lru.LRU[string, *bsky.FeedPost]
 }
 
 var run = func(cmd *cli.Context) error {
+	opt := struct {
+		PdsUrl          string
+		JetstreamUrl    string
+		AccountHandle   string
+		AccountPassword string
+		WatchedOps      []string
+		LabelerUrl      string
+		LabelerKey      string
+		LmstudioHost    string
+	}{
+		PdsUrl:          cmd.String("pds-url"),
+		JetstreamUrl:    cmd.String("jetstream-url"),
+		AccountHandle:   cmd.String("account-handle"),
+		AccountPassword: cmd.String("account-password"),
+		WatchedOps:      cmd.StringSlice("watched-ops"),
+		LabelerUrl:      cmd.String("labeler-url"),
+		LabelerKey:      cmd.String("labeler-key"),
+		LmstudioHost:    cmd.String("lmstudio-host"),
+	}
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+
+	watchedOps := make(map[string]struct{}, len(opt.WatchedOps))
+	for _, op := range opt.WatchedOps {
+		watchedOps[op] = struct{}{}
+	}
+
+	xrpcc := &xrpc.Client{
+		Host: opt.PdsUrl,
+		// Headers: make(map[string]string),
+		// Auth:    &xrpc.AuthInfo{},
+	}
+
+	httpc := util.RobustHTTPClient()
+
+	lmstudioc := NewLMStudioClient(opt.LmstudioHost, logger)
+
+	postCache := lru.NewLRU[string, *bsky.FeedPost](100, nil, 1*time.Hour)
+
 	dsmt := &DontShowMeThis{
 		logger: slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			Level:     slog.LevelInfo,
 			AddSource: true,
 		})),
-		labelerUrl: cmd.String("labeler-url"),
-		labelerKey: cmd.String("labeler-key"),
+		labelerUrl: opt.LabelerUrl,
+		labelerKey: opt.LabelerKey,
+		watchedOps: watchedOps,
+		xrpcc:      xrpcc,
+		httpc:      httpc,
+		lmstudioc:  lmstudioc,
+		postCache:  postCache,
 	}
-
-	cli := &xrpc.Client{
-		Host:    cmd.String("pds"),
-		Headers: make(map[string]string),
-		Auth:    &xrpc.AuthInfo{},
-	}
-
-	dsmt.bskyClient = cli
-
-	dsmt.h = util.RobustHTTPClient()
-
-	r := redis.NewClient(&redis.Options{
-		Addr: cmd.String("redis-addr"),
-	})
-
-	dsmt.r = r
 
 	dsmt.startConsumer(cmd.String("jetstream-url"))
 
 	return nil
 }
 
-func (dsmt *DontShowMeThis) startConsumer(jsurl string) {
+func (dsmt *DontShowMeThis) startConsumer(jetstreamUrl string) {
 	config := client.DefaultClientConfig()
-	config.WebsocketURL = jsurl
+	config.WebsocketURL = jetstreamUrl
 	config.Compress = true
 
 	scheduler := sequential.NewScheduler("jetstream_localdev", dsmt.logger, dsmt.handleEvent)
@@ -120,11 +174,6 @@ func (dsmt *DontShowMeThis) startConsumer(jsurl string) {
 	}
 
 	dsmt.logger.Info("shutdown")
-}
-
-type handler struct {
-	seenSeqs  map[int64]struct{}
-	highwater int64
 }
 
 func (dsmt *DontShowMeThis) handleEvent(ctx context.Context, event *models.Event) error {
@@ -168,7 +217,7 @@ func (dsmt *DontShowMeThis) emitLabel(ctx context.Context, uri, label string) er
 	req.Header.Set("authorization", "Bearer "+dsmt.labelerKey)
 	req.Header.Set("content-type", "application/json")
 
-	resp, err := dsmt.h.Do(req)
+	resp, err := dsmt.httpc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -180,9 +229,31 @@ func (dsmt *DontShowMeThis) emitLabel(ctx context.Context, uri, label string) er
 		return fmt.Errorf("received invalid status code from server: %d", resp.StatusCode)
 	}
 
-	if _, err := dsmt.r.SAdd(ctx, RedisPrefix+label, uri).Result(); err != nil {
-		return err
+	return nil
+}
+
+func (dsmt *DontShowMeThis) getPost(ctx context.Context, uri string) (*bsky.FeedPost, error) {
+	post, ok := dsmt.postCache.Get(uri)
+	if ok {
+		return post, nil
 	}
 
-	return nil
+	resp, err := bsky.FeedGetPosts(ctx, dsmt.xrpcc, []string{uri})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get post: %w", err)
+	}
+
+	if resp == nil || len(resp.Posts) == 0 {
+		return nil, fmt.Errorf("failed to get posts (empty response)")
+	}
+
+	postView := resp.Posts[0]
+	post, ok = postView.Record.Val.(*bsky.FeedPost)
+	if !ok {
+		return nil, fmt.Errorf("failed to get post (invalid record)")
+	}
+
+	dsmt.postCache.Add(uri, post)
+
+	return post, nil
 }

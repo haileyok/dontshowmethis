@@ -1,12 +1,11 @@
 module github.com/haileyok/dontshowmethis
 
-go 1.23
-
-toolchain go1.23.8
+go 1.24
 
 require (
-	github.com/bluesky-social/indigo v0.0.0-20250425223227-c6066a8845a0
+	github.com/bluesky-social/indigo v0.0.0-20251010014239-c74e8a3208cf
 	github.com/bluesky-social/jetstream v0.0.0-20250414024304-d17bd81a945e
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/joho/godotenv v1.5.1
 	github.com/urfave/cli/v2 v2.27.6
 )
@@ -17,6 +16,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/earthboundkid/versioninfo/v2 v2.24.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.1 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

@@ -3,8 +3,7 @@ import Fastify from 'fastify'
 import 'dotenv/config'
 
 const LABELS: Record<string, boolean> = {
-  'pol-link': true,
-  'pol-link-reply': true,
+  'bad-faith': true,
 }
 
 function run() {

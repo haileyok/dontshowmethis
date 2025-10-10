@@ -2,90 +2,73 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"net/url"
-	"strings"
+	"time"
 
 	"github.com/bluesky-social/indigo/api/bsky"
+	"github.com/bluesky-social/indigo/atproto/syntax"
 	"github.com/bluesky-social/jetstream/pkg/models"
-	"github.com/haileyok/dontshowmethis/sets"
 )
-
-func uriFromEvent(evt *models.Event) string {
-	return fmt.Sprintf("at://%s/%s/%s", evt.Did, evt.Commit.Collection, evt.Commit.RKey)
-}
-
-func isPolDomain(domain string) bool {
-	for _, d := range sets.PolDomains {
-		if strings.Contains(domain, d) {
-			return true
-		}
-	}
-	return false
-}
 
 func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event, post *bsky.FeedPost) error {
 	if event == nil || event.Commit == nil {
 		return nil
 	}
 
-	if post.Embed == nil && post.Reply == nil && len(post.Facets) == 0 {
+	if post.Reply == nil {
 		return nil
 	}
 
-	if post.Embed != nil && post.Embed.EmbedExternal != nil && post.Embed.EmbedExternal.External != nil {
-		external := post.Embed.EmbedExternal.External
-
-		u, err := url.Parse(external.Uri)
-		if err != nil {
-			return err
-		}
-
-		domain := strings.ToLower(u.Hostname())
-
-		if isPolDomain(domain) {
-			if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLink); err != nil {
-				return err
-			}
-			return nil
-		}
+	if post.Reply.Parent == nil {
+		return errors.New("badly formatted reply ref (no parent)")
 	}
 
-	for _, f := range post.Facets {
-		for _, ff := range f.Features {
-			if ff.RichtextFacet_Link == nil {
-				continue
-			}
-
-			u, err := url.Parse(ff.RichtextFacet_Link.Uri)
-			if err != nil {
-				return err
-			}
-
-			domain := strings.ToLower(u.Hostname())
-
-			if isPolDomain(domain) {
-				if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLink); err != nil {
-					return err
-				}
-				return nil
-			}
-		}
+	atUri, err := syntax.ParseATURI(post.Reply.Parent.Uri)
+	if err != nil {
+		return fmt.Errorf("failed to parse parent aturi: %w", err)
 	}
 
-	// if post.Reply != nil {
-	// 	ism, err := dsmt.r.SIsMember(ctx, RedisPrefix+LabelPolLink, post.Reply.Root.Uri).Result()
-	// 	if err != nil && err != redis.Nil {
-	// 		return err
-	// 	}
-	//
-	// 	if ism {
-	// 		if err := dsmt.emitLabel(ctx, uriFromEvent(event), LabelPolLinkReply); err != nil {
-	// 			return err
-	// 		}
-	// 		return nil
-	// 	}
-	// }
+	opDid := atUri.Authority().String()
+	_, ok := dsmt.watchedOps[opDid]
+	if !ok {
+		return nil
+	}
+
+	uri := fmt.Sprintf("at://%s/%s/%s", event.Did, event.Commit.Collection, event.Commit.RKey)
+
+	logger := dsmt.logger.With("opDid", opDid, "replyDid", event.Did, "uri", uri)
+
+	logger.Info("ingested reply to watched op")
+
+	if post.Text == "" {
+		logger.Info("post contained no text, skipping")
+		return nil
+	}
+
+	parent, err := dsmt.getPost(ctx, post.Reply.Parent.Uri)
+	if err != nil {
+		return fmt.Errorf("failed to get parent post: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	isBadFaith, err := dsmt.lmstudioc.GetIsBadFaith(ctx, parent.Text, post.Text)
+	if err != nil {
+		return fmt.Errorf("failed to check bad faith: %w", err)
+	}
+
+	if !isBadFaith {
+		logger.Info("determined that reply was not bad faith")
+		return nil
+	}
+
+	if err := dsmt.emitLabel(ctx, uri, LabelBadFaith); err != nil {
+		return fmt.Errorf("failed to label post: %w", err)
+	}
+
+	logger.Info("determined that reply was bad faith and emitted label")
 
 	return nil
 }
