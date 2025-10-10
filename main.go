@@ -88,6 +88,11 @@ func main() {
 				Required: true,
 			},
 			&cli.StringFlag{
+				Name:    "endpoint-override",
+				Usage:   "override for completions api endpoint",
+				EnvVars: []string{"COMPLETIONS_ENDPOINT_OVERRIDE"},
+			},
+			&cli.StringFlag{
 				Name:    "log-db",
 				Usage:   "name of the logging db (sqlite)",
 				EnvVars: []string{"LOG_DB_NAME"},
@@ -97,6 +102,18 @@ func main() {
 				Usage:   "name of the model to use with openai completions api",
 				EnvVars: []string{"MODEL_NAME"},
 				Value:   "google/gemma-3-27b",
+			},
+			&cli.StringFlag{
+				Name:    "completions-api-key",
+				Aliases: []string{"api-key"},
+				Usage:   "completions api key if required",
+				EnvVars: []string{"COMPLETIONS_API_KEY"},
+			},
+			&cli.StringFlag{
+				Name:    "completions-api-key-type",
+				Aliases: []string{"api-key-type"},
+				Usage:   "api key type. either \"bearer\" or \"x-api-key\"",
+				EnvVars: []string{"COMPLETIONS_API_KEY_TYPE"},
 			},
 		},
 	}
@@ -125,35 +142,47 @@ type DontShowMeThis struct {
 
 var run = func(cmd *cli.Context) error {
 	opt := struct {
-		PdsUrl          string
-		JetstreamUrl    string
-		AccountHandle   string
-		AccountPassword string
-		WatchedOps      []string
-		WatchedLogOps   []string
-		LoggedLabels    []string
-		LabelerUrl      string
-		LabelerKey      string
-		LmstudioHost    string
-		LogDbName       string
-		ModelName       string
+		PdsUrl                      string
+		JetstreamUrl                string
+		AccountHandle               string
+		AccountPassword             string
+		WatchedOps                  []string
+		WatchedLogOps               []string
+		LoggedLabels                []string
+		LabelerUrl                  string
+		LabelerKey                  string
+		LmstudioHost                string
+		LogDbName                   string
+		ModelName                   string
+		CompletionsEndpointOverride string
+		CompletionsApiKey           string
+		CompletionsApiKeyType       string
 	}{
-		PdsUrl:          cmd.String("pds-url"),
-		JetstreamUrl:    cmd.String("jetstream-url"),
-		AccountHandle:   cmd.String("account-handle"),
-		AccountPassword: cmd.String("account-password"),
-		WatchedOps:      cmd.StringSlice("watched-ops"),
-		WatchedLogOps:   cmd.StringSlice("watched-log-ops"),
-		LoggedLabels:    cmd.StringSlice("logged-labels"),
-		LabelerUrl:      cmd.String("labeler-url"),
-		LabelerKey:      cmd.String("labeler-key"),
-		LmstudioHost:    cmd.String("completions-api-host"),
-		LogDbName:       cmd.String("log-db"),
-		ModelName:       cmd.String("model-name"),
+		PdsUrl:                      cmd.String("pds-url"),
+		JetstreamUrl:                cmd.String("jetstream-url"),
+		AccountHandle:               cmd.String("account-handle"),
+		AccountPassword:             cmd.String("account-password"),
+		WatchedOps:                  cmd.StringSlice("watched-ops"),
+		WatchedLogOps:               cmd.StringSlice("watched-log-ops"),
+		LoggedLabels:                cmd.StringSlice("logged-labels"),
+		LabelerUrl:                  cmd.String("labeler-url"),
+		LabelerKey:                  cmd.String("labeler-key"),
+		LmstudioHost:                cmd.String("completions-api-host"),
+		LogDbName:                   cmd.String("log-db"),
+		ModelName:                   cmd.String("model-name"),
+		CompletionsEndpointOverride: cmd.String("completions-endpoint-override"),
+		CompletionsApiKey:           cmd.String("completions-api-key"),
+		CompletionsApiKeyType:       cmd.String("completions-api-key-type"),
 	}
 
 	if len(opt.LoggedLabels) > 0 && opt.LogDbName == "" {
 		return fmt.Errorf("attempting to log labels, but did not include a db name in arguments")
+	}
+
+	if opt.CompletionsApiKey != "" {
+		if opt.CompletionsApiKeyType != "bearer" && opt.CompletionsApiKeyType != "x-api-key" {
+			return fmt.Errorf("bad api key type. must be either \"bearer\" or \"x-api-key\"")
+		}
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -186,7 +215,7 @@ var run = func(cmd *cli.Context) error {
 
 	httpc := util.RobustHTTPClient()
 
-	lmstudioc := NewLMStudioClient(opt.LmstudioHost, opt.ModelName, logger)
+	lmstudioc := NewLMStudioClient(opt.LmstudioHost, opt.CompletionsEndpointOverride, opt.CompletionsApiKey, opt.CompletionsApiKeyType, opt.ModelName, logger)
 
 	postCache := lru.NewLRU[string, *bsky.FeedPost](100, nil, 1*time.Hour)
 

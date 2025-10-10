@@ -8,15 +8,19 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/bluesky-social/indigo/pkg/robusthttp"
 )
 
 type LMStudioClient struct {
-	host      string
-	httpc     *http.Client
-	logger    *slog.Logger
-	modelName string
+	host             string
+	httpc            *http.Client
+	logger           *slog.Logger
+	modelName        string
+	endpointOverride string
+	apiKey           string
+	apiKeyType       string
 }
 type ResponseSchema struct {
 	Type       string              `json:"type"`
@@ -89,29 +93,53 @@ var (
 	}
 )
 
-func NewLMStudioClient(host string, modelName string, logger *slog.Logger) *LMStudioClient {
+func NewLMStudioClient(host string, endpointOverride string, apiKey string, apiKeyType string, modelName string, logger *slog.Logger) *LMStudioClient {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	logger = logger.With("component", "lmstudio")
 	httpc := robusthttp.NewClient()
 	return &LMStudioClient{
-		host:      host,
-		httpc:     httpc,
-		logger:    logger,
-		modelName: modelName,
+		host:             host,
+		httpc:            httpc,
+		logger:           logger,
+		modelName:        modelName,
+		endpointOverride: endpointOverride,
+		apiKey:           apiKey,
+		apiKeyType:       apiKeyType,
 	}
 }
 
-func (c *LMStudioClient) sendChatRequest(request ChatRequest) (*ChatResponse, error) {
-	url := fmt.Sprintf("%s/v1/chat/completions", c.host)
+func (c *LMStudioClient) sendChatRequest(ctx context.Context, request ChatRequest) (*ChatResponse, error) {
+	host := c.host
+	endpoint := "/v1/chat/completions"
+	if c.endpointOverride != "" {
+		endpoint = c.endpointOverride
+	}
+
+	url := fmt.Sprintf("%s%s", host, endpoint)
 
 	b, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("error marshaling request: %w", err)
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("accept", "application/json")
+	if c.apiKey != "" {
+		if c.apiKeyType == "bearer" {
+			req.Header.Set("authorization", "Bearer "+c.apiKey)
+		} else if c.apiKeyType == "x-api-key" {
+			req.Header.Set("x-api-key", c.apiKey)
+		}
+	}
+
+	resp, err := c.httpc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error sending request: %w", err)
 	}
@@ -146,7 +174,7 @@ func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string
 		Messages: []Message{
 			{
 				Role:    "system",
-				Content: "You are an observer of posts on a microblogging website. You determine if the second message provided by the user is a bad faith reply, an off topic reply, and/or a funny reply to the second message provided to you. Opposing viewpoints are good, and should be appreciated. However, things that are toxic, trollish, or offer no good value to the conversation are considered bad faith. Just because something is bad faith or off topic does not mean the post cannot also be funny.",
+				Content: "You are an observer of posts on a microblogging website. You determine if the second message provided by the user is a bad faith reply, an off topic reply, and/or a funny reply to the second message provided to you. Opposing viewpoints are good, and should be appreciated. However, things that are toxic, trollish, or offer no good value to the conversation are considered bad faith. Just because something is bad faith or off topic does not mean the post cannot also be funny. Always respond with pure JSON. The structure should be {bad_faith: boolean, off_topic: boolean, funny: boolean}. Never include additional context about why you made a choice, only the raw JSON.",
 			},
 			{
 				Role:    "user",
@@ -168,14 +196,20 @@ func (c *LMStudioClient) GetIsBadFaith(ctx context.Context, parent, reply string
 			},
 		},
 	}
-	response, err := c.sendChatRequest(request)
+	response, err := c.sendChatRequest(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get chat response: %w", err)
 	}
 
+	rawJson := response.Choices[0].Message.Content
+	if after, ok := strings.CutPrefix(rawJson, "```json"); ok {
+		rawJson = after
+		rawJson = strings.TrimSuffix(rawJson, "```")
+	}
+
 	var result map[string]any
-	if err := json.Unmarshal([]byte(response.Choices[0].Message.Content), &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	if err := json.Unmarshal([]byte(rawJson), &result); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal response: %w %+v", err, response)
 	}
 
 	badFaith, ok := result["bad_faith"].(bool)
