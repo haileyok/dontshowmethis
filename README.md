@@ -6,6 +6,8 @@ An AI-powered Bluesky content moderation system that automatically labels replie
 
 This project monitors Bluesky posts in real-time via Jetstream and uses an LLM (via any OpenAI-compatible completions API) to classify replies to watched accounts. It automatically applies labels such as "bad-faith", "off-topic", and "funny" to help users filter and moderate content.
 
+The system supports multiple AI providers including LM Studio (local), OpenAI, Claude (Anthropic), and any other OpenAI-compatible API.
+
 The system consists of two components:
 1. **Go Consumer** - Monitors the Jetstream firehose and analyzes replies using an LLM
 2. **Skyware Labeler** - TypeScript server that manages and emits content labels
@@ -24,7 +26,11 @@ Jetstream → Go Consumer → Completions API (LLM) → Labeler Service → Blue
 
 ## Prerequisites
 
-- An OpenAI-compatible completions API endpoint (e.g., [LM Studio](https://lmstudio.ai/), OpenAI, or any other compatible provider)
+- An OpenAI-compatible completions API endpoint:
+  - [LM Studio](https://lmstudio.ai/) (local, free)
+  - [OpenAI](https://platform.openai.com/) (cloud, paid)
+  - [Claude/Anthropic](https://www.anthropic.com/) (cloud, paid)
+  - Any other OpenAI-compatible provider
 - A Bluesky account for the labeler
 
 ## Installation
@@ -71,7 +77,11 @@ cp .env.example .env
 - `JETSTREAM_URL` - Jetstream WebSocket URL (default: `wss://jetstream2.us-west.bsky.network/subscribe`)
 - `LABELER_URL` - URL of your labeler service (e.g., `http://localhost:3000`)
 - `LABELER_KEY` - Authentication key for the labeler API
-- `COMPLETIONS_API_HOST` - Completions API host (e.g., `http://localhost:1234`)
+- `COMPLETIONS_API_HOST` - Completions API host (e.g., `http://localhost:1234` for LM Studio, `https://api.openai.com` for OpenAI, `https://api.anthropic.com` for Claude)
+- `COMPLETIONS_ENDPOINT_OVERRIDE` - (Optional) Override the API endpoint path. Required for Claude (`/v1/messages`). Defaults to `/v1/chat/completions` if not specified
+- `COMPLETIONS_API_KEY` - (Optional) API key for providers that require authentication (OpenAI, Claude, etc.)
+- `COMPLETIONS_API_KEY_TYPE` - (Optional) API key authentication type. Either `bearer` (for OpenAI) or `x-api-key` (for Claude)
+- `MODEL_NAME` - Model name to use (default: `google/gemma-3-27b`)
 - `LOG_DB_NAME` - The name of the SQLite db to log to
 
 **For the Skyware Labeler:**
@@ -84,15 +94,47 @@ cp .env.example .env
 
 ### 1. Start your Completions API
 
-Start your OpenAI-compatible completions API endpoint. For example:
+The system supports multiple AI providers. Configure the appropriate environment variables based on your provider:
 
-**Using LM Studio:**
+**Using LM Studio (Local):**
 1. Open LM Studio
 2. Load a compatible model (recommended: `google/gemma-3-27b` or similar)
 3. Start the local server (usually runs on `http://localhost:1234`)
+4. Configure:
+   ```bash
+   COMPLETIONS_API_HOST=http://localhost:1234
+   MODEL_NAME=google/gemma-3-27b
+   # No API key required for local LM Studio
+   ```
 
-**Using OpenAI or other providers:**
-- Ensure your API endpoint is accessible and you have configured `COMPLETIONS_API_HOST` in your `.env` file
+**Using OpenAI:**
+Configure the following in your `.env`:
+```bash
+COMPLETIONS_API_HOST=https://api.openai.com
+COMPLETIONS_API_KEY=sk-proj-...
+COMPLETIONS_API_KEY_TYPE=bearer
+MODEL_NAME=gpt-4o-mini  # or gpt-4o, gpt-3.5-turbo, etc.
+# COMPLETIONS_ENDPOINT_OVERRIDE not needed (uses default /v1/chat/completions)
+```
+
+**Using Claude (Anthropic):**
+Configure the following in your `.env`:
+```bash
+COMPLETIONS_API_HOST=https://api.anthropic.com
+COMPLETIONS_ENDPOINT_OVERRIDE=/v1/messages
+COMPLETIONS_API_KEY=sk-ant-...
+COMPLETIONS_API_KEY_TYPE=x-api-key
+MODEL_NAME=claude-3-5-sonnet-20241022  # or other Claude models
+```
+
+**Using other OpenAI-compatible APIs:**
+Most providers use the same configuration as OpenAI (bearer token auth):
+```bash
+COMPLETIONS_API_HOST=https://your-provider-api.com
+COMPLETIONS_API_KEY=your-api-key
+COMPLETIONS_API_KEY_TYPE=bearer
+MODEL_NAME=provider-model-name
+```
 
 ### 2. Start the Labeler Service
 
