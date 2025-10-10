@@ -115,6 +115,11 @@ func main() {
 				Usage:   "api key type. either \"bearer\" or \"x-api-key\"",
 				EnvVars: []string{"COMPLETIONS_API_KEY_TYPE"},
 			},
+			&cli.BoolFlag{
+				Name:    "log-no-labels",
+				Usage:   "log posts with no labels as \"no-labels\" (does not emit)",
+				EnvVars: []string{"LOG_NO_LABELS"},
+			},
 		},
 	}
 
@@ -137,7 +142,8 @@ type DontShowMeThis struct {
 
 	postCache *lru.LRU[string, *bsky.FeedPost]
 
-	db *gorm.DB
+	db           *gorm.DB
+	logNoLabels  bool
 }
 
 var run = func(cmd *cli.Context) error {
@@ -157,6 +163,7 @@ var run = func(cmd *cli.Context) error {
 		CompletionsEndpointOverride string
 		CompletionsApiKey           string
 		CompletionsApiKeyType       string
+		LogNoLabels                 bool
 	}{
 		PdsUrl:                      cmd.String("pds-url"),
 		JetstreamUrl:                cmd.String("jetstream-url"),
@@ -173,6 +180,7 @@ var run = func(cmd *cli.Context) error {
 		CompletionsEndpointOverride: cmd.String("completions-endpoint-override"),
 		CompletionsApiKey:           cmd.String("completions-api-key"),
 		CompletionsApiKeyType:       cmd.String("completions-api-key-type"),
+		LogNoLabels:                 cmd.Bool("log-no-labels"),
 	}
 
 	if len(opt.LoggedLabels) > 0 && opt.LogDbName == "" {
@@ -233,6 +241,7 @@ var run = func(cmd *cli.Context) error {
 		httpc:         httpc,
 		lmstudioc:     lmstudioc,
 		postCache:     postCache,
+		logNoLabels:   opt.LogNoLabels,
 	}
 
 	if opt.LogDbName != "" {

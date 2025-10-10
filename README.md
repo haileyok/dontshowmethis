@@ -83,6 +83,7 @@ cp .env.example .env
 - `COMPLETIONS_API_KEY_TYPE` - (Optional) API key authentication type. Either `bearer` (for OpenAI) or `x-api-key` (for Claude)
 - `MODEL_NAME` - Model name to use (default: `google/gemma-3-27b`)
 - `LOG_DB_NAME` - The name of the SQLite db to log to
+- `LOG_NO_LABELS` - (Optional) When enabled, logs posts with no labels as "no-labels" to the database (does not emit labels)
 
 **For the Skyware Labeler:**
 

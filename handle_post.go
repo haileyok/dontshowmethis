@@ -77,7 +77,24 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 	}
 
 	if len(labels) == 0 {
-		logger.Info("no labels to emit or log")
+		if dsmt.logNoLabels && dsmt.db != nil {
+			item := LogItem{
+				ParentDid:  opDid,
+				AuthorDid:  event.Did,
+				ParentUri:  parentUri,
+				AuthorUri:  uri,
+				ParentText: parent.Text,
+				AuthorText: post.Text,
+				Label:      "no-labels",
+			}
+
+			if err := dsmt.db.Create(&item).Error; err != nil {
+				return fmt.Errorf("failed to insert log: %w", err)
+			}
+			logger.Info("logged", "label", "no-labels")
+		} else {
+			logger.Info("no labels to emit or log")
+		}
 		return nil
 	}
 
@@ -90,7 +107,7 @@ func (dsmt *DontShowMeThis) handlePost(ctx context.Context, event *models.Event,
 		}
 
 		_, isLoggedLabel := dsmt.loggedLabels[l]
-		if dsmt.db != nil && (isWatchedOp || isWatchedLogOp) && isLoggedLabel {
+		if dsmt.db != nil && isLoggedLabel {
 			item := LogItem{
 				ParentDid:  opDid,
 				AuthorDid:  event.Did,
