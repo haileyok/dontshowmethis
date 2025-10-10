@@ -65,11 +65,14 @@ cp .env.example .env
 - `PDS_URL` - Your Bluesky PDS URL (e.g., `https://bsky.social`)
 - `ACCOUNT_HANDLE` - Your Bluesky account handle
 - `ACCOUNT_PASSWORD` - Your Bluesky account password
-- `WATCHED_OPS` - Comma-separated list of DIDs to monitor for replies
+- `WATCHED_OPS` - Comma-separated list of DIDs to monitor for replies and emit labels for
+- `WATCHED_LOG_OPS` - Comma-separated list of DIDs to monitor for replies but not emit labels for. Will use SQLite to keep a log
+- `LOGGED_LABELS` - Comma-separated list of labels that will be logged to the SQLite database
 - `JETSTREAM_URL` - Jetstream WebSocket URL (default: `wss://jetstream2.us-west.bsky.network/subscribe`)
 - `LABELER_URL` - URL of your labeler service (e.g., `http://localhost:3000`)
 - `LABELER_KEY` - Authentication key for the labeler API
 - `LMSTUDIO_HOST` - LM Studio API host (e.g., `http://localhost:1234`)
+- `LOG_DB_NAME` - The name of the SQLite db to log to
 
 **For the Skyware Labeler:**
 

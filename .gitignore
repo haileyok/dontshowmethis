@@ -1,5 +1,6 @@
 dontshowmethis
 node_modules/
 labels.db*
+*.db
 .env
 *.js
